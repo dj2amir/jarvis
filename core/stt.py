@@ -126,9 +126,19 @@ class STT:
         if self.provider == "local":
             try:
                 from faster_whisper import WhisperModel
-                self._local_model = WhisperModel(
-                    "base", device="cpu", compute_type="int8"
-                )
+
+                # Clear proxy env vars for model download (same as Brain)
+                proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
+                              "https_proxy", "ALL_PROXY", "all_proxy"]
+                saved = {k: os.environ.pop(k, None) for k in proxy_keys if k in os.environ}
+                try:
+                    self._local_model = WhisperModel(
+                        "base", device="cpu", compute_type="int8"
+                    )
+                finally:
+                    for k, v in saved.items():
+                        os.environ[k] = v
+
                 print("  → Using local faster-whisper")
             except Exception as e:
                 print(f"  ⚠️ faster-whisper not available: {e}")

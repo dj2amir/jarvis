@@ -9,7 +9,7 @@ face:
 
 voice:
   # Speech-to-Text: openai (Whisper API) or local (faster-whisper)
-  stt_provider: openai
+  stt_provider: local
   # Text-to-Speech: edge-tts (free) or openai (premium)
   tts_provider: edge-tts
   tts_voice: default
