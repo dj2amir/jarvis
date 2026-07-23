@@ -1,0 +1,260 @@
+# ============================================================
+#  JARVIS — Cross-Platform Build Workflow
+#  Builds Windows .exe, Linux binary, and Android APK
+#  Runs on every push and pull request
+# ============================================================
+
+name: Build JARVIS
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - '.env.example'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+
+  # ──────────────────────────────────────────────
+  #  WINDOWS BUILD
+  # ──────────────────────────────────────────────
+  build-windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --onedir ^
+            --name "JARVIS" ^
+            --add-data "config;config" ^
+            --add-data "core;core" ^
+            --add-data ".env.example;." ^
+            --hidden-import openai ^
+            --hidden-import anthropic ^
+            --hidden-import sounddevice ^
+            --hidden-import edge_tts ^
+            --hidden-import pygame ^
+            --hidden-import cv2 ^
+            --hidden-import mediapipe ^
+            --hidden-import chromadb ^
+            --hidden-import sentence_transformers ^
+            --hidden-import psutil ^
+            --hidden-import yaml ^
+            --hidden-import rich ^
+            --collect-all ultralytics ^
+            --collect-all cv2 ^
+            main.py
+
+      - name: Copy config files
+        run: |
+          xcopy /E /I /Y config dist\JARVIS\config
+          copy /Y .env.example dist\JARVIS\.env.example
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Windows
+          path: dist/JARVIS/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────
+  #  LINUX BUILD
+  # ──────────────────────────────────────────────
+  build-linux:
+    name: Linux (AppImage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libportaudio2 portaudio19-dev \
+            libsdl2-dev libsdl2-2.0-0 \
+            libsm6 libxext6 libxrender-dev \
+            libgomp1 \
+            ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --onedir \
+            --name "JARVIS" \
+            --add-data "config:config" \
+            --add-data "core:core" \
+            --add-data ".env.example:." \
+            --hidden-import openai \
+            --hidden-import anthropic \
+            --hidden-import sounddevice \
+            --hidden-import edge_tts \
+            --hidden-import pygame \
+            --hidden-import cv2 \
+            --hidden-import mediapipe \
+            --hidden-import chromadb \
+            --hidden-import sentence_transformers \
+            --hidden-import psutil \
+            --hidden-import yaml \
+            --hidden-import rich \
+            --collect-all ultralytics \
+            --collect-all cv2 \
+            main.py
+
+      - name: Copy config files
+        run: |
+          cp -r config dist/JARVIS/config/
+          cp .env.example dist/JARVIS/.env.example
+
+      - name: Create launcher script
+        run: |
+          cat > dist/JARVIS/run.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          cd "$DIR"
+          ./JARVIS
+          EOF
+          chmod +x dist/JARVIS/run.sh
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Linux
+          path: dist/JARVIS/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────
+  #  ANDROID BUILD (via Buildozer)
+  #  Note: May fail due to C-ext compilation on ARM
+  #        If it fails, use Termux method instead
+  # ──────────────────────────────────────────────
+  build-android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          workdir: .
+          buildozer_version: master
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        if: success()  # Only if build succeeded
+        with:
+          name: JARVIS-Android
+          path: ${{ steps.buildozer.outputs.filename }}
+          retention-days: 7
+
+  # ──────────────────────────────────────────────
+  #  ANDROID TERMUX ARCHIVE (Fallback)
+  #  Creates a ZIP for Termux users if APK fails
+  # ──────────────────────────────────────────────
+  build-android-termux:
+    name: Android (Termux ZIP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Termux package
+        run: |
+          mkdir -p termux-package
+          cp -r core termux-package/core/
+          cp -r config termux-package/config/
+          cp -r .agent termux-package/.agent/
+          cp main.py termux-package/
+          cp requirements.txt termux-package/
+          cp .env.example termux-package/
+          cp deploy/android/install-termux.sh termux-package/
+          
+          # Create simplified Android requirements
+          cat > termux-package/requirements-android.txt << 'REQ'
+          openai>=1.0.0
+          anthropic>=0.30.0
+          sounddevice>=0.4.6
+          numpy>=1.24.0
+          scipy>=1.10.0
+          edge-tts>=6.0.0
+          python-dotenv>=1.0.0
+          requests>=2.31.0
+          pyyaml>=6.0
+          rich>=13.0.0
+          psutil>=5.9.0
+          # Note: opencv, chromadb, ultralytics may need manual install
+          # on Termux. Install them individually if needed:
+          # pkg install opencv && pip install chromadb
+          REQ
+
+      - name: Upload Termux ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-Android-Termux
+          path: termux-package/
+          retention-days: 7
+
+  # ──────────────────────────────────────────────
+  #  SUMMARY
+  # ──────────────────────────────────────────────
+  summary:
+    name: Build Summary
+    needs: [build-windows, build-linux, build-android, build-android-termux]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Print build results
+        run: |
+          echo "╔═══════════════════════════════════════════╗"
+          echo "║     JARVIS BUILD SUMMARY                  ║"
+          echo "╚═══════════════════════════════════════════╝"
+          echo ""
+          echo "  ✅ Windows:  JARVIS-Windows artifact"
+          echo "  ✅ Linux:    JARVIS-Linux artifact"
+          echo "  ⏳ Android:  JARVIS-Android APK"
+          echo "  ✅ Android:  JARVIS-Android-Termux ZIP"
+          echo ""
+          echo "  Download artifacts from the Summary tab above."

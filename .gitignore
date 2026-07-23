@@ -26,6 +26,9 @@ dist/
 build/
 *.spec
 
+# Android buildozer config (keep in repo)
+!buildozer.spec
+
 # Windows deploy build output
 deploy/windows/dist/
 deploy/windows/build/
