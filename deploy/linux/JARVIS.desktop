@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=JARVIS
+Comment=Self-Evolving AI Assistant
+Exec=/opt/jarvis/deploy/linux/run.sh
+Icon=/opt/jarvis/assets/face/jarvis-icon.png
+Terminal=true
+Type=Application
+Categories=Utility;ArtificialIntelligence;
+StartupNotify=true

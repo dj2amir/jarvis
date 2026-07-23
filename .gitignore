@@ -1,0 +1,33 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# JARVIS data
+memory_store/*
+!memory_store/.gitkeep
+logs/*
+!logs/.gitkeep
+custom_tools/*
+!custom_tools/__init__.py
+!custom_tools/.gitkeep
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# Windows deploy build output
+deploy/windows/dist/
+deploy/windows/build/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+# JARVIS Configuration
+general:
+  name: JARVIS
+  user_name: Sir
+
+face:
+  mode: terminal
+  style: robot
+
+voice:
+  stt_provider: openai
+  tts_provider: edge-tts
+  wake_word: jarvis
+
+brain:
+  primary_provider: openai
+  model: gpt-4o
+  streaming: true
+
+vision:
+  enabled: false
+  camera_id: 0
+
+hardware:
+  enabled: false
+  mode: simulation
