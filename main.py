@@ -25,6 +25,7 @@ def main():
     from core.tts import TTS
     from core.brain import Brain
     from core.memory import Memory
+    from core.wake_word import WakeWordEngine
 
     settings = Settings()
     face = Face(settings)
@@ -32,6 +33,7 @@ def main():
     stt = STT(settings)
     tts = TTS(settings, face=face)
     brain = Brain(settings, face=face, memory=memory)
+    wake = WakeWordEngine(settings, face=face)
     
     print("\n" + "=" * 50)
     print("  🤖 JARVIS — Self-Evolving AI Assistant")
@@ -65,6 +67,12 @@ def main():
     if missing_tiers:
         print(f"  💡 Optional: {' · '.join(missing_tiers)} (auto-installs when needed)")
     
+    wake_mode = "Porcupine" if wake.mode == "porcupine" else "Voice-Energy"
+    if wake.enabled:
+        print(f"  🔊 Wake word: Active (mode: {wake_mode})")
+    else:
+        print("  🔊 Wake word: Disabled (enable in config/settings.yaml)")
+    
     print()
     print("  Commands:")
     print("    <ask anything>    — JARVIS thinks and responds")
@@ -72,6 +80,7 @@ def main():
     print("    /recall <query>   — Search JARVIS's memories")
     print("    /listen           — Record microphone")
     print("    /face             — Show face demo")
+    print("    /wake             — Toggle wake word on/off")
     print("    /deps             — Check/install dependencies")
     print("    /memory           — Show memory stats")
     print("    /status           — Show feature status")
@@ -79,7 +88,51 @@ def main():
     print()
     
     memory.log_event("milestone", "JARVIS started", success=True)
-    face.show_emotion("neutral")
+    
+    # ── Start wake word listener ────────────────────────────────────
+    if wake.enabled and stt.is_available():
+        face.show_emotion("sleeping")
+        print("  😴 JARVIS sleeping — say 'Hey JARVIS' to wake me!")
+        memory.log_event("milestone", "Wake word listening started", success=True)
+        wake.start(on_wake=_handle_wake_command)
+    else:
+        face.show_emotion("neutral")
+
+    # ── Wake word handler (closure over modules in main scope) ─────
+    def _handle_wake_command():
+        """Full voice interaction cycle: listen → think → speak.
+
+        Runs in the wake word listener thread.  All JARVIS modules are
+        designed for single-thread access; the face uses terminal writes
+        which are safe under CPython's GIL for short bursts.
+        """
+        memory.log_event("wake_word", "Wake word detected", success=True)
+        face.listen_start()
+
+        print("\n  🎤 Listening for command...")
+        text = stt.listen(timeout=10)
+
+        if text:
+            print(f"  🎤 You said: {text}")
+            face.think()
+            memory.add_conversation("user", text)
+
+            # Non-streaming for voice — full response before speaking
+            response = brain.think(text, stream=False)
+
+            if response:
+                print(f"\n  JARVIS: {response}")
+                face.speak_start()
+                tts.speak_and_wait(response)
+                memory.add_conversation("assistant", response)
+                memory.log_event("interaction", f"Spoken command: {text[:50]}...",
+                                 success=True)
+        else:
+            print("  No command detected.")
+            tts.speak("I didn't catch that. Try again.")
+
+        # Return to idle
+        face.show_emotion("sleeping")
     
     try:
         while True:
@@ -99,6 +152,20 @@ def main():
             
             elif lower == "/face":
                 face.animate_demo()
+            
+            elif lower == "/wake":
+                if wake.enabled:
+                    if wake.is_active:
+                        wake.stop()
+                        print("  🔇 Wake word: OFF")
+                        face.show_emotion("neutral")
+                    else:
+                        face.show_emotion("sleeping")
+                        wake.start(on_wake=lambda: _handle_wake_command(
+                            face, stt, brain, tts, memory))
+                        print("  🔊 Wake word: ON — say 'Hey JARVIS'")
+                else:
+                    print("  ⚠️ Wake word is disabled in config/settings.yaml")
             
             elif lower == "/listen":
                 face.listen_start()
@@ -136,6 +203,7 @@ def main():
                 print("    /recall <query>   — Search memories")
                 print("    /listen           — Speak with microphone")
                 print("    /face             — Show face demo")
+                print("    /wake             — Toggle wake word on/off")
                 print("    /deps             — Auto-install missing dependencies")
                 print("    /status           — Show feature availability")
                 print("    /memory           — Show memory stats")

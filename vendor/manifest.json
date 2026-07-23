@@ -20,7 +20,7 @@
       ]
     },
     "voice": {
-      "description": "Speech-to-text and text-to-speech",
+      "description": "Speech-to-text, text-to-speech, and wake word",
       "required": false,
       "auto_detect": true,
       "deps": [
@@ -28,7 +28,8 @@
         "sounddevice==0.5.5",
         "soundfile==0.13.1",
         "numpy==1.26.4",
-        "scipy==1.15.3"
+        "scipy==1.15.3",
+        "pvporcupine>=3.0.0"
       ]
     },
     "memory": {

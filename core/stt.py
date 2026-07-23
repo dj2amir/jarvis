@@ -105,6 +105,19 @@ class STT:
     def is_available(self) -> bool:
         """Check if microphone capture is available."""
         return self._capture_method is not None and self.provider is not None
+
+    def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
+        """Transcribe raw audio data to text (thread-safe).
+
+        Public wrapper around _transcribe for use by WakeWordEngine.
+
+        Args:
+            audio_data: numpy array of float32 audio [-1.0, 1.0]
+
+        Returns:
+            Transcribed text or None.
+        """
+        return self._transcribe(audio_data)
     
     def listen(self, timeout: float = None) -> Optional[str]:
         """
@@ -129,29 +142,21 @@ class STT:
     
     def listen_with_wake_word(self, callback: Callable[[str], None]):
         """
-        Background thread: continuously listen for wake word,
-        then record command and call callback with transcription.
+        Legacy: Start background wake word listener.
+
+        Deprecated in favour of core.wake_word.WakeWordEngine which provides
+        lower-latency Porcupine detection + VAD-based audio capture.
         """
-        if not self.wake_word_enabled:
-            print("⚠️ Wake word not enabled")
-            return
-        
-        def _listener():
-            print(f"🔊 Listening for wake word: '{self.wake_word}'...")
-            # NOTE: Full Porcupine wake word detection is planned for future.
-            # Current implementation uses continuous recording + transcription
-            # which is not real-time. For production, integrate pvporcupine.
-            while True:
-                audio = self._record_audio(timeout=None)
-                if audio is not None:
-                    text = self._transcribe(audio)
-                    if text and self.wake_word in text.lower():
-                        print(f"🔊 Wake word detected!")
-                        self._wake_word_detected.set()
-                        callback(text)
-        
-        thread = threading.Thread(target=_listener, daemon=True)
-        thread.start()
+        from core.wake_word import WakeWordEngine
+        engine = WakeWordEngine(self.settings, face=None)
+        if engine.enabled:
+            engine.start(on_wake=lambda: self._on_wake_legacy(engine, callback))
+
+    def _on_wake_legacy(self, engine, callback):
+        """Legacy: transcribe command after wake word and forward to callback."""
+        text = self.listen(timeout=10)
+        if text:
+            callback(text)
     
     def _record_audio(self, timeout: float = None) -> Optional[np.ndarray]:
         """
