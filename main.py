@@ -99,6 +99,7 @@ def main():
     print("    /listen           — Record microphone")
     print("    /see              — Take a screenshot (JARVIS describes it)")
     print("    /cam              — Take a webcam photo (JARVIS describes it)")
+    print("    /gui              — Toggle PyQt6 GUI face")
     print("    /do <name> <args> — Run an action/tool")
     print("    /tools            — List all available tools")
     print("    /face             — Show face demo")
@@ -211,6 +212,16 @@ def main():
                     result = jarvis_actions.execute(tool_name, **kwargs)
                     print(f"  Result: {result}")
 
+            elif lower == "/gui":
+                if face.mode == "gui":
+                    face.disable_gui()
+                else:
+                    if face.enable_gui():
+                        print("  🖥️ GUI face window opened!")
+                        print("  Close the window or type /gui to return to terminal.")
+                    else:
+                        print("  ⚠️ Install PyQt6: pip install PyQt6")
+
             elif lower == "/face":
                 face.animate_demo()
             
@@ -322,7 +333,12 @@ def main():
             elif lower == "/listen":
                 face.listen_start()
                 print("  🎤 Listening...")
+                # Feed mic level to GUI face
+                if face.mode == "gui":
+                    face.set_mic_level(0.5)  # listening indicator
                 text = stt.listen(timeout=5)
+                if face.mode == "gui":
+                    face.set_mic_level(0.0)
                 if text:
                     print(f"\n  You said: {text}")
                     response = brain.think(text)
@@ -356,6 +372,7 @@ def main():
                 print("    /listen           — Speak with microphone")
                 print("    /see              — Take a screenshot")
                 print("    /cam              — Take a webcam photo")
+                print("    /gui              — Toggle GUI face")
                 print("    /do <name> <args> — Run an action/tool")
                 print("    /tools            — List all available tools")
                 print("    /face             — Show face demo")

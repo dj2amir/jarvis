@@ -606,6 +606,9 @@ class Face:
         self._backend = TerminalFace()
         self._backend.set_style(self.style_name)
 
+        # ── GUI face (lazy-loaded) ─────────────────────────────
+        self._gui_face = None
+
         self._first_render = True
 
         print(f"🎭 JARVIS face ready! Mode: {self.mode} | Style: {self.style_name}")
@@ -622,7 +625,10 @@ class Face:
         self._backend.set_emotion(self.current_emotion)
         if emotion != "speaking":
             self._is_speaking = False
-        self._update_display()
+        if self.mode == "gui" and self._gui_face:
+            self._gui_face.show_emotion(emotion)
+        else:
+            self._update_display()
 
     def look_at(self, x, y):
         """Eye tracking target (0.0-1.0 normalized). Stub for future use."""
@@ -674,6 +680,50 @@ class Face:
 
     def is_thinking(self):
         return self.current_emotion == "thinking"
+
+    # ── GUI mode ────────────────────────────────────────────────
+
+    def enable_gui(self) -> bool:
+        """Switch to PyQt6 GUI face mode.
+
+        Returns True on success, False if PyQt6 is not available.
+        """
+        if self.mode == "gui" and self._gui_face:
+            return True  # already enabled
+
+        try:
+            from core.gui_face import GuiFace
+            self._gui_face = GuiFace()
+            # Wait for Qt thread to be ready before sending emotions
+            self._gui_face._ready.wait(timeout=3)
+            self.mode = "gui"
+            self._gui_face.show_emotion(self.current_emotion)
+            print("🖥️ GUI face enabled! Close the window or type /gui to return to terminal.")
+            return True
+        except ImportError:
+            print("⚠️ PyQt6 not installed. Run: pip install PyQt6")
+            return False
+        except Exception as e:
+            print(f"⚠️ Failed to start GUI face: {e}")
+            return False
+
+    def disable_gui(self):
+        """Switch back to terminal face mode."""
+        if self._gui_face:
+            try:
+                self._gui_face.close()
+            except Exception:
+                pass
+            self._gui_face = None
+        self.mode = "terminal"
+        self._first_render = True
+        self.show_emotion(self.current_emotion)
+        print("🎭 Switched to terminal face.")
+
+    def set_mic_level(self, level: float):
+        """Update mic level in GUI mode."""
+        if self.mode == "gui" and self._gui_face:
+            self._gui_face.set_mic_level(level)
 
     # ── Tick: advance all animations ────────────────────────────
 
