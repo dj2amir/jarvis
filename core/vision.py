@@ -1,11 +1,13 @@
 """
-Vision Engine — Screen Capture for JARVIS.
+Vision Engine — Screen and Webcam Capture for JARVIS.
 
-Multi-strategy approach that works on:
+Screen capture strategies:
   - Wayland: grim (wlroots), gnome-screenshot (GNOME), import (ImageMagick)
   - X11: PIL.ImageGrab (direct)
 
-Also supports webcam capture via OpenCV when available.
+Webcam capture strategies:
+  - OpenCV (cv2) when available
+  - fswebcam CLI fallback
 """
 
 import subprocess
@@ -180,3 +182,105 @@ def available_strategy() -> Optional[str]:
     if _is_pil_grab_available():
         return "PIL.ImageGrab"
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Webcam Capture
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _cv2_available() -> bool:
+    """Check if OpenCV is importable."""
+    try:
+        import cv2
+        return True
+    except ImportError:
+        return False
+
+
+def _capture_webcam_cv2(device: int = 0) -> Optional[Image.Image]:
+    """Capture a webcam frame using OpenCV."""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(device)
+        if not cap.isOpened():
+            return None
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            return None
+        # BGR to RGB
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(rgb)
+    except Exception:
+        return None
+
+
+def _capture_webcam_fswebcam() -> Optional[Image.Image]:
+    """Capture a webcam frame using fswebcam CLI tool."""
+    path = _temp_capture_path()
+    try:
+        subprocess.run(
+            ["fswebcam", "--no-banner", "-r", "1280x720", "-q", path],
+            check=True, capture_output=True, timeout=5
+        )
+        img = Image.open(path)
+        return img.convert("RGB")
+    except Exception:
+        return None
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def capture_webcam(device: int = 0) -> Optional[Image.Image]:
+    """Capture a frame from the webcam.
+
+    Tries OpenCV first (if installed), then fswebcam CLI as fallback.
+
+    Args:
+        device: Camera device index (0 = default webcam).
+
+    Returns: PIL Image in RGB mode, or None if no webcam available.
+    """
+    if _cv2_available():
+        return _capture_webcam_cv2(device)
+    if _which("fswebcam"):
+        return _capture_webcam_fswebcam()
+    return None
+
+
+def capture_webcam_base64(max_size: Tuple[int, int] = (640, 480)) -> Optional[str]:
+    """Capture webcam and return as base64 JPEG.
+
+    Returns: base64-encoded JPEG string, or None on failure.
+    """
+    img = capture_webcam()
+    if img is None:
+        return None
+
+    img.thumbnail(max_size, Image.LANCZOS)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=75)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def capture_webcam_file(path: str, max_size: Tuple[int, int] = (1280, 720)) -> Optional[str]:
+    """Capture webcam and save to a file.
+
+    Returns: the file path on success, None on failure.
+    """
+    img = capture_webcam()
+    if img is None:
+        return None
+
+    img.thumbnail(max_size, Image.LANCZOS)
+    img.save(path, format="PNG")
+    return path
+
+
+def is_webcam_available() -> bool:
+    """Check if webcam capture is available via any strategy."""
+    return _cv2_available() or _which("fswebcam")

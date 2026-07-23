@@ -27,6 +27,7 @@ def main():
     from core.memory import Memory
     from core.wake_word import WakeWordEngine
     from core.vision import is_available as vision_available, available_strategy as vision_strategy
+    from core.vision import is_webcam_available
     import actions as jarvis_actions
 
     settings = Settings()
@@ -81,6 +82,11 @@ def main():
     else:
         print("  📸 Vision: Not available (install: sudo apt install gnome-screenshot)")
     
+    if is_webcam_available():
+        print("  📷 Webcam: Ready")
+    else:
+        print("  📷 Webcam: Not available (install: pip install opencv-python)")
+    
     # Show available tools
     tools_count = len(jarvis_actions.get_all_tools())
     print(f"  🔧 Tools: {tools_count} available ({', '.join(jarvis_actions._MODULES.keys())})")
@@ -92,6 +98,7 @@ def main():
     print("    /recall <query>   — Search JARVIS's memories")
     print("    /listen           — Record microphone")
     print("    /see              — Take a screenshot (JARVIS describes it)")
+    print("    /cam              — Take a webcam photo (JARVIS describes it)")
     print("    /do <name> <args> — Run an action/tool")
     print("    /tools            — List all available tools")
     print("    /face             — Show face demo")
@@ -222,7 +229,7 @@ def main():
                     print("  ⚠️ Wake word is disabled in config/settings.yaml")
             
             elif lower == "/see":
-                from core.vision import capture_screen, capture_screen_base64, is_available as vis_ok
+                from core.vision import capture_screen, is_available as vis_ok
                 if not vis_ok():
                     print("  📸 Screen capture not available.")
                     print("     Install: sudo apt install gnome-screenshot")
@@ -230,30 +237,24 @@ def main():
                     face.think()
                     print("  📸 Capturing screen...")
                     
-                    # Capture once, reuse for both vision analysis and file save
                     img = capture_screen()
                     if img is None:
                         print("  ❌ Screenshot failed.")
                         face.show_emotion("neutral")
                     else:
-                        # Save a copy to ~/Pictures/jarvis/
                         from datetime import datetime
                         pics_dir = os.path.expanduser("~/Pictures/jarvis")
                         os.makedirs(pics_dir, exist_ok=True)
                         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                         save_path = os.path.join(pics_dir, f"screenshot_{ts}.png")
                         
-                        # Resize and save for file
                         from PIL import Image
                         save_img = img.copy()
                         save_img.thumbnail((1920, 1080), Image.LANCZOS)
                         save_img.save(save_path, format="PNG")
                         print(f"  💾 Saved: {save_path}")
                         
-                        # Encode for vision model
                         print("  🧠 Analyzing screen with vision model...")
-                        image_b64 = capture_screen_base64()
-                        # Reuse the already-captured image for base64 to avoid re-capture
                         from io import BytesIO
                         import base64
                         thumb = img.copy()
@@ -265,6 +266,50 @@ def main():
                         response = brain.think_with_image(
                             "Describe what you see on this screen in detail. "
                             "What applications are open? What is the user looking at?",
+                            image_b64
+                        )
+                        if response:
+                            print(f"\n  JARVIS: {response}")
+                            tts.speak(response)
+                        else:
+                            print("  ⚠️ Vision model didn't respond — your LLM may not support images.")
+                            face.show_emotion("neutral")
+
+            elif lower == "/cam":
+                from core.vision import capture_webcam, is_webcam_available as cam_ok
+                from PIL import Image
+                if not cam_ok():
+                    print("  📷 Webcam not available.")
+                    print("     Install: pip install opencv-python")
+                else:
+                    face.think()
+                    print("  📷 Capturing webcam...")
+                    
+                    img = capture_webcam()
+                    if img is None:
+                        print("  ❌ Webcam capture failed — check camera connection.")
+                        face.show_emotion("neutral")
+                    else:
+                        from datetime import datetime
+                        pics_dir = os.path.expanduser("~/Pictures/jarvis")
+                        os.makedirs(pics_dir, exist_ok=True)
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        save_path = os.path.join(pics_dir, f"webcam_{ts}.png")
+                        img.save(save_path, format="PNG")
+                        print(f"  💾 Saved: {save_path}")
+                        
+                        print("  🧠 Analyzing webcam with vision model...")
+                        from io import BytesIO
+                        import base64
+                        thumb = img.copy()
+                        thumb.thumbnail((640, 480), Image.LANCZOS)
+                        buf = BytesIO()
+                        thumb.save(buf, format="JPEG", quality=75)
+                        image_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                        
+                        response = brain.think_with_image(
+                            "Describe what you see in this webcam image. "
+                            "Is there a person? What are they doing? What's the setting?",
                             image_b64
                         )
                         if response:
@@ -310,6 +355,7 @@ def main():
                 print("    /recall <query>   — Search memories")
                 print("    /listen           — Speak with microphone")
                 print("    /see              — Take a screenshot")
+                print("    /cam              — Take a webcam photo")
                 print("    /do <name> <args> — Run an action/tool")
                 print("    /tools            — List all available tools")
                 print("    /face             — Show face demo")
