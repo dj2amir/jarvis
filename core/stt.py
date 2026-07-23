@@ -133,7 +133,7 @@ class STT:
                 saved = {k: os.environ.pop(k, None) for k in proxy_keys if k in os.environ}
                 try:
                     self._local_model = WhisperModel(
-                        "tiny", device="cpu", compute_type="int8"
+                        "tiny", device="cpu", compute_type="float32"
                     )
                 finally:
                     for k, v in saved.items():
@@ -376,7 +376,12 @@ class STT:
             return None
         
         try:
-            segments, info = self._local_model.transcribe(audio, beam_size=5)
+            # Convert float32 [-1,1] to int16 — faster-whisper expects int16
+            if audio.dtype == np.float32 or audio.dtype == np.float64:
+                audio = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+            segments, info = self._local_model.transcribe(
+                audio, beam_size=5, language="en"
+            )
             text = " ".join(segment.text for segment in segments)
             return text.strip()
         except Exception as e:
