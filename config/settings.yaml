@@ -20,7 +20,7 @@ voice:
   silence_threshold: 500
   silence_timeout: 1.5
   max_record_seconds: 30
-  wake_word_enabled: false
+  wake_word_enabled: true
   wake_word: jarvis
 
 brain:

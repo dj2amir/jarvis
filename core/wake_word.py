@@ -42,7 +42,7 @@ import numpy as np
 
 PORCUPINE_FRAME_LENGTH = 512       # samples per frame @ 16kHz
 VAD_CHUNK_SECONDS = 0.5            # seconds per VAD energy check
-VAD_ENERGY_THRESHOLD = 40.0        # RMS threshold (raw int16) — tune for your mic
+VAD_ENERGY_THRESHOLD = 12.0       # RMS threshold (raw int16) — tune for your mic
 VAD_MIN_DURATION = 1.0             # minimum speech before transcription
 VAD_MAX_DURATION = 3.0             # max speech per wake check
 VAD_SILENCE_TIMEOUT = 1.2          # silence seconds → end of utterance

@@ -25,6 +25,7 @@ import wave
 import numpy as np
 from pathlib import Path
 from typing import Optional, Callable
+import yaml
 
 
 class STT:
@@ -83,13 +84,44 @@ class STT:
     def _setup_provider(self):
         """Initialize the STT provider."""
         if self.provider == "openai":
+            saved_proxies = {}
             try:
                 import openai
-                self._client = openai.OpenAI()
-                print("  → Using OpenAI Whisper API")
+
+                # Save and clear proxy env vars (same as Brain does)
+                proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
+                              "https_proxy", "ALL_PROXY", "all_proxy"]
+                saved_proxies = {k: os.environ.pop(k, None) for k in proxy_keys}
+
+                # Try to read LM Studio URL from providers.yaml first
+                provider_cfg = self._load_provider_config()
+                lm_base_url = provider_cfg.get("base_url")
+                lm_api_key = provider_cfg.get("api_key", "sk-no-key")
+
+                if lm_base_url:
+                    self._client = openai.OpenAI(
+                        api_key=lm_api_key,
+                        base_url=lm_base_url,
+                    )
+                    print(f"  → Using OpenAI Whisper API")
+                    print(f"     Endpoint: {lm_base_url}")
+                else:
+                    # Fall back to default OpenAI env vars
+                    api_key = os.environ.get("OPENAI_API_KEY", None)
+                    if api_key:
+                        self._client = openai.OpenAI(api_key=api_key)
+                        print("  → Using OpenAI Whisper API")
+                    else:
+                        print("  ⚠️ No Whisper endpoint configured")
+                        self.provider = None
+                        return
             except Exception as e:
                 print(f"  ⚠️ OpenAI not available: {e}")
                 self.provider = "local"
+            finally:
+                for k, v in saved_proxies.items():
+                    if v is not None:
+                        os.environ[k] = v
         
         if self.provider == "local":
             try:
@@ -102,6 +134,23 @@ class STT:
                 print(f"  ⚠️ faster-whisper not available: {e}")
                 self.provider = None
     
+    def _load_provider_config(self) -> dict:
+        """Load LLM provider config from providers.yaml (same as Brain)."""
+        path = Path(__file__).parent.parent / "config" / "providers.yaml"
+        if path.exists():
+            try:
+                with open(path) as f:
+                    cfg = yaml.safe_load(f) or {}
+                primary = cfg.get("primary", {})
+                # Interpolate ${ENV_VAR} patterns
+                for key, val in primary.items():
+                    if isinstance(val, str) and val.startswith("${") and val.endswith("}"):
+                        primary[key] = os.environ.get(val[2:-1], "")
+                return primary
+            except Exception:
+                pass
+        return {}
+
     def is_available(self) -> bool:
         """Check if microphone capture is available."""
         return self._capture_method is not None and self.provider is not None

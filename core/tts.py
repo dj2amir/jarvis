@@ -54,19 +54,11 @@ class TTS:
         print(f"🗣️ TTS ready | Provider: {self.provider} | Playback: {self._playback_method}")
     
     def _detect_playback(self):
-        """Detect which audio playback method is available."""
-        # Try aplay (Linux)
-        try:
-            result = subprocess.run(
-                ["aplay", "--version"],
-                capture_output=True, text=True, timeout=2
-            )
-            if result.returncode == 0:
-                return "aplay"
-        except Exception:
-            pass
-        
-        # Try ffplay
+        """Detect which audio playback method is available.
+
+        Prefers ffplay (handles MP3 natively) over aplay (WAV only).
+        """
+        # ffplay handles MP3 natively — preferred for edge-tts
         try:
             result = subprocess.run(
                 ["ffplay", "-version"],
@@ -74,6 +66,29 @@ class TTS:
             )
             if result.returncode == 0:
                 return "ffplay"
+        except Exception:
+            pass
+
+        # Check ffmpeg for MP3→WAV conversion + aplay
+        self._ffmpeg_available = False
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-version"],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                self._ffmpeg_available = True
+        except Exception:
+            pass
+
+        # aplay (WAV only — needs ffmpeg for MP3 conversion)
+        try:
+            result = subprocess.run(
+                ["aplay", "--version"],
+                capture_output=True, text=True, timeout=2
+            )
+            if result.returncode == 0:
+                return "aplay"
         except Exception:
             pass
         
@@ -240,18 +255,36 @@ class TTS:
     
     def _play_audio(self, path: str):
         """Play an audio file using the detected playback method."""
-        if self._playback_method == "aplay":
-            subprocess.run(
-                ["aplay", "-q", path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        elif self._playback_method == "ffplay":
+        if self._playback_method == "ffplay":
+            # ffplay handles MP3 natively — clean playback
             subprocess.run(
                 ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+        elif self._playback_method == "aplay":
+            # aplay only supports WAV — convert MP3 first if needed
+            play_path = path
+            if path.lower().endswith(".mp3") and hasattr(self, '_ffmpeg_available') and self._ffmpeg_available:
+                wav_path = path + ".wav"
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", path, "-ac", "1", "-ar", "24000", wav_path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if Path(wav_path).exists():
+                    play_path = wav_path
+            if play_path == path and path.lower().endswith(".mp3"):
+                # Can't play MP3 with aplay — warn and skip
+                print("⚠️ TTS: Cannot play MP3 without ffmpeg conversion")
+                return
+            subprocess.run(
+                ["aplay", "-q", play_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            # Clean up converted WAV
+            if play_path != path:
+                Path(play_path).unlink(missing_ok=True)
         elif self._playback_method == "sounddevice":
             self._play_sounddevice(path)
     

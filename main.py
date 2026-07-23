@@ -88,17 +88,9 @@ def main():
     print()
     
     memory.log_event("milestone", "JARVIS started", success=True)
-    
-    # ── Start wake word listener ────────────────────────────────────
-    if wake.enabled and stt.is_available():
-        face.show_emotion("sleeping")
-        print("  😴 JARVIS sleeping — say 'Hey JARVIS' to wake me!")
-        memory.log_event("milestone", "Wake word listening started", success=True)
-        wake.start(on_wake=_handle_wake_command)
-    else:
-        face.show_emotion("neutral")
 
     # ── Wake word handler (closure over modules in main scope) ─────
+    # Must be defined BEFORE it's referenced by wake.start() below.
     def _handle_wake_command():
         """Full voice interaction cycle: listen → think → speak.
 
@@ -133,6 +125,21 @@ def main():
 
         # Return to idle
         face.show_emotion("sleeping")
+
+    # ── Start wake word listener ────────────────────────────────────
+    # WakeWordEngine uses its own arecord pipe (not sounddevice),
+    # so it can work even when STT's PortAudio-based capture is unavailable.
+    if wake.enabled:
+        face.show_emotion("sleeping")
+        if stt.is_available():
+            print("  🎤 Microphone: Ready (via sounddevice)")
+        else:
+            print("  🎤 Microphone: arecord fallback active")
+        print("  😴 JARVIS sleeping — say 'Hey JARVIS' to wake me!")
+        memory.log_event("milestone", "Wake word listening started", success=True)
+        wake.start(on_wake=_handle_wake_command)
+    else:
+        face.show_emotion("neutral")
     
     try:
         while True:
