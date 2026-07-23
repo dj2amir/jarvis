@@ -17,7 +17,7 @@ voice:
   tts_volume: 0.8
   audio_sample_rate: 16000
   audio_input_device: null
-  silence_threshold: 100
+  silence_threshold: 10
   silence_timeout: 1.2
   max_record_seconds: 30
   wake_word_enabled: true
