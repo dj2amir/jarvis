@@ -1,28 +1,24 @@
 """
 Wake Word Detection Engine.
 
-Listens for "Hey JARVIS" in real-time audio and fires a callback.
+Listens for speech and fires a callback to wake JARVIS.
 
-Two modes:
-  1. porcupine  — Picovoice Porcupine (<200ms latency, needs free access key)
-  2. vad+stt    — Voice Energy Detection + Whisper transcription (practical, ~2-3s)
+Three modes (auto-selected):
+  1. porcupine   — Picovoice Porcupine (<200ms, needs free access key)
+  2. energy-only — Pure energy detection, NO keys, NO API, NO transcription
+  3. vad+stt     — Energy + Whisper transcription (legacy, needs Whisper)
 
 The engine auto-selects Porcupine if PICOVOICE_ACCESS_KEY is set, otherwise
-falls back to VAD+STT which works immediately with arecord + OpenAI Whisper.
+uses energy-only mode which triggers on any sustained speech.
 
-Architecture:
-  ┌──────────────────────────────┐
-  │     WakeWordEngine           │
-  │  ┌──────────────────────┐   │
-  │  │  arecord (PIPE)      │   │
-  │  │  raw PCM @ 16kHz     │   │
-  │  └──────┬───────────────┘   │
-  │         │ frames            │
-  │  ┌──────▼───────────────┐   │
-  │  │  Porcupine?  ───yes───►  │  callback()
-  │  │  or VAD+Whisper?      │   │
-  │  └──────────────────────┘   │
-  └──────────────────────────────┘
+Energy-only flow:
+  ┌──────────────┐
+  │ arecord pipe │ ── raw PCM ──► RMS > threshold?
+  └──────────────┘                    │
+                              ┌──────▼──────┐
+                              │  YES: fire! │  ──► callback()
+                              └─────────────┘
+      (no keys, no cloud, no transcription — 100% local)
 """
 
 import os
@@ -75,7 +71,7 @@ class WakeWordEngine:
         self._on_wake: Optional[Callable[[], None]] = None
         self._last_detection = 0.0
         self._porcupine = None
-        self._mode: str = "vad+stt"  # default fallback
+        self._mode: str = "energy-only"  # default: no keys, no API, just energy
         self._cooldown = WAKE_COOLDOWN
 
         # ── Try Porcupine (fast mode) ─────────────────────────
@@ -119,6 +115,8 @@ class WakeWordEngine:
         try:
             if self._mode == "porcupine":
                 self._listen_porcupine()
+            elif self._mode == "energy-only":
+                self._listen_energy_only()
             else:
                 self._listen_vad_stt()
         except Exception as e:
@@ -176,7 +174,61 @@ class WakeWordEngine:
         finally:
             proc.kill()
 
-    # ── VAD + STT mode (practical fallback, ~2-4s) ───────────────
+    # ── Energy-only mode (no keys, no API, 100% local) ──────────
+
+    def _listen_energy_only(self):
+        """Energy-based wake detection — NO keys, NO cloud, NO transcription.
+
+        Continuously monitors audio energy.  When sustained speech is
+        detected (at least 1 second of voice followed by 0.5s silence),
+        fires the wake callback immediately.
+
+        No audio data is sent anywhere.  Works 100% offline.
+        """
+        chunk_samples = int(self.sample_rate * VAD_CHUNK_SECONDS)
+        chunk_bytes = chunk_samples * 2  # 16-bit
+
+        proc = self._spawn_arecord_pipe()
+        was_speech = False
+        speech_frames = 0
+        silence_frames = 0
+        min_speech = int(1.0 / VAD_CHUNK_SECONDS)     # 1 second of speech
+        min_silence = int(0.5 / VAD_CHUNK_SECONDS)    # 0.5s of silence after
+
+        try:
+            while self._active:
+                data = proc.stdout.read(chunk_bytes)
+                if not data or len(data) < chunk_bytes:
+                    proc.kill()
+                    proc = self._spawn_arecord_pipe()
+                    continue
+
+                samples = np.frombuffer(data, dtype=np.int16).astype(np.float64)
+                rms = float(np.sqrt(np.mean(samples ** 2)))
+                is_speech = rms > VAD_ENERGY_THRESHOLD
+
+                if is_speech:
+                    speech_frames += 1
+                    silence_frames = 0
+                    was_speech = True
+                elif was_speech:
+                    silence_frames += 1
+                    # Enough speech followed by enough silence = wake!
+                    if speech_frames >= min_speech and silence_frames >= min_silence:
+                        self._fire_wake()
+                        speech_frames = 0
+                        silence_frames = 0
+                        was_speech = False
+                # Safety: max speech duration resets
+                if was_speech and speech_frames > int(10.0 / VAD_CHUNK_SECONDS):
+                    speech_frames = 0
+                    silence_frames = 0
+                    was_speech = False
+
+        finally:
+            proc.kill()
+
+    # ── VAD + STT mode (legacy, needs Whisper) ─────────────────────
 
     def _listen_vad_stt(self):
         """Energy-based voice detection + Whisper transcription.
