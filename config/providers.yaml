@@ -1,0 +1,39 @@
+# ============================================
+# JARVIS — AI Provider Configuration
+# ============================================
+# You can use ANY provider with ANY model.
+# The system will fall through providers if one fails.
+
+# Primary LLM provider
+primary:
+  provider: openai
+  model: qwen2.5-coder-14b-instruct
+  api_key: ${LM_STUDIO_API_KEY}
+  base_url: http://10.10.10.18:1234/v1
+  temperature: 0.7
+  max_tokens: 4096
+
+# Fallback providers (tried in order if primary fails)
+fallback_providers:
+  - provider: openai
+    model: qwen3.6-27b
+    api_key: ${LM_STUDIO_API_KEY}
+    base_url: http://10.10.10.18:1234/v1
+  - provider: openai
+    model: qwen2.5-vl-7b-instruct
+    api_key: ${LM_STUDIO_API_KEY}
+    base_url: http://10.10.10.18:1234/v1
+
+# For vision tasks (sees images)
+vision_provider:
+  provider: openai
+  model: qwen2.5-vl-7b-instruct
+  api_key: ${LM_STUDIO_API_KEY}
+  base_url: http://10.10.10.18:1234/v1
+
+# For code generation tasks
+code_provider:
+  provider: openai
+  model: qwen2.5-coder-14b-instruct
+  api_key: ${LM_STUDIO_API_KEY}
+  base_url: http://10.10.10.18:1234/v1

@@ -8,14 +8,34 @@ face:
   style: robot
 
 voice:
+  # Speech-to-Text: openai (Whisper API) or local (faster-whisper)
   stt_provider: openai
+  # Text-to-Speech: edge-tts (free) or openai (premium)
   tts_provider: edge-tts
+  tts_voice: default
+  tts_speed: 1.0
+  tts_volume: 0.8
+  audio_sample_rate: 16000
+  audio_input_device: null
+  silence_threshold: 500
+  silence_timeout: 1.5
+  max_record_seconds: 30
+  wake_word_enabled: false
   wake_word: jarvis
 
 brain:
   primary_provider: openai
-  model: gpt-4o
+  model: qwen2.5-coder-14b-instruct
   streaming: true
+  max_history_tokens: 6000
+
+memory:
+  enabled: true
+  storage_path: ./memory_store
+  log_path: ./logs
+  max_history_tokens: 6000
+  max_history_messages: 20
+  auto_extract_facts: true
 
 vision:
   enabled: false
