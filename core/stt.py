@@ -133,7 +133,7 @@ class STT:
                 saved = {k: os.environ.pop(k, None) for k in proxy_keys if k in os.environ}
                 try:
                     self._local_model = WhisperModel(
-                        "base", device="cpu", compute_type="int8"
+                        "tiny", device="cpu", compute_type="int8"
                     )
                 finally:
                     for k, v in saved.items():
