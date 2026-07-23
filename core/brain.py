@@ -263,6 +263,75 @@ class Brain:
 
         self._is_thinking = False
         return response
+
+    def think_with_image(self, prompt: str, image_base64: str) -> Optional[str]:
+        """Process a prompt with an attached image (for vision models).
+
+        Sends the image as a base64 JPEG data URL to the vision-capable LLM.
+        Works with qwen2.5-vl, GPT-4V, Claude 3 Vision, and any OpenAI-vision-compatible API.
+
+        Returns: text response describing the image, or None on failure.
+        """
+        if not self._openai_available or not self._has_config:
+            return None
+
+        self._is_thinking = True
+        if self.face:
+            self.face.think()
+
+        self._extract_memory(prompt)
+
+        config = self._primary_config
+        api_key = config.get("api_key", "not-needed")
+        base_url = config.get("base_url")
+        model = config.get("model", "gpt-4o")
+
+        # Build multimodal message
+        user_content = [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+            },
+        ]
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+        saved_proxies = {
+            k: os.environ.pop(k, None)
+            for k in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
+        }
+
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=config.get("max_tokens", 2048),
+                temperature=config.get("temperature", 0.7),
+            )
+
+            result = response.choices[0].message.content
+
+            if result:
+                self._update_history(prompt, result)
+                self._store_memory_from_response(prompt, result)
+
+            self._is_thinking = False
+            return result
+
+        except Exception as e:
+            self._is_thinking = False
+            return f"⚠️ Vision call failed: {e}"
+        finally:
+            for k, v in saved_proxies.items():
+                if v is not None:
+                    os.environ[k] = v
     
     def _call_llm(self, config: dict, user_input: str,
                   stream: bool = False,
