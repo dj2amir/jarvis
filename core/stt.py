@@ -127,19 +127,20 @@ class STT:
             try:
                 from faster_whisper import WhisperModel
 
-                # Clear proxy env vars for model download (same as Brain)
+                model_size = self.settings.get("voice.whisper_model", "tiny")
+
                 proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
                               "https_proxy", "ALL_PROXY", "all_proxy"]
                 saved = {k: os.environ.pop(k, None) for k in proxy_keys if k in os.environ}
                 try:
                     self._local_model = WhisperModel(
-                        "tiny", device="cpu", compute_type="float32"
+                        model_size, device="cpu", compute_type="float32"
                     )
                 finally:
                     for k, v in saved.items():
                         os.environ[k] = v
 
-                print("  → Using local faster-whisper")
+                print(f"  → Using local faster-whisper ({model_size}, auto-detect language)")
             except Exception as e:
                 print(f"  ⚠️ faster-whisper not available: {e}")
                 self.provider = None
@@ -380,10 +381,15 @@ class STT:
             if audio.dtype == np.float32 or audio.dtype == np.float64:
                 audio = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
             segments, info = self._local_model.transcribe(
-                audio, beam_size=5, language="en"
+                audio, beam_size=5, language=None, vad_filter=True
             )
+            detected_lang = info.language
+            lang_prob = info.language_probability
             text = " ".join(segment.text for segment in segments)
-            return text.strip()
+            result = text.strip()
+            if result and detected_lang != 'en':
+                print(f"  🌐 Detected: {detected_lang} ({lang_prob:.0%})")
+            return result
         except Exception as e:
             print(f"  ⚠️ Local whisper error: {e}")
             return None

@@ -118,8 +118,14 @@ class TTS:
                 self.provider = "edge-tts"
         
         if self.provider == "edge-tts":
-            # edge-tts doesn't need initialization
-            print("  → Using edge-tts (free)")
+            self._langdetect_available = False
+            try:
+                from langdetect import detect as _lang_detect
+                self._lang_detect_fn = _lang_detect
+                self._langdetect_available = True
+            except ImportError:
+                pass
+            print("  → Using edge-tts (multi-language, free)")
     
     def is_available(self) -> bool:
         """Check if speech synthesis is available."""
@@ -196,37 +202,123 @@ class TTS:
             if self.face and not self._stop_requested:
                 self.face.speak_end()
     
+    def _pick_voice_for_text(self, text: str) -> str:
+        """Pick the best edge-tts voice for the detected language.
+
+        Uses langdetect if available, otherwise Unicode script detection.
+        """
+        # If user specified a voice, use it
+        if self.voice and self.voice != "default":
+            return self.voice
+
+        # Multi-language voice map (edge-tts Neural voices)
+        VOICE_MAP = {
+            "en": "en-US-GuyNeural",
+            "fr": "fr-FR-HenriNeural",
+            "de": "de-DE-ConradNeural",
+            "es": "es-ES-AlvaroNeural",
+            "it": "it-IT-DiegoNeural",
+            "pt": "pt-BR-AntonioNeural",
+            "ru": "ru-RU-DmitryNeural",
+            "ja": "ja-JP-KeitaNeural",
+            "ko": "ko-KR-InJoonNeural",
+            "zh-cn": "zh-CN-YunxiNeural",
+            "zh-tw": "zh-TW-YunJheNeural",
+            "ar": "ar-SA-HamedNeural",
+            "hi": "hi-IN-MadhurNeural",
+            "nl": "nl-NL-MaartenNeural",
+            "pl": "pl-PL-MarekNeural",
+            "tr": "tr-TR-AhmetNeural",
+            "sv": "sv-SE-MattiasNeural",
+            "th": "th-TH-NiwatNeural",
+            "vi": "vi-VN-NamMinhNeural",
+            "id": "id-ID-ArdiNeural",
+            "ms": "ms-MY-OsmanNeural",
+            "fil": "fil-PH-AngeloNeural",
+            "uk": "uk-UA-OstapNeural",
+            "cs": "cs-CZ-AntoninNeural",
+            "el": "el-GR-NestorasNeural",
+            "hu": "hu-HU-TamasNeural",
+            "ro": "ro-RO-EmilNeural",
+            "da": "da-DK-JeppeNeural",
+            "fi": "fi-FI-HarriNeural",
+            "nb": "nb-NO-FinnNeural",
+        }
+
+        lang = "en"  # default
+
+        # Try langdetect first
+        if self._langdetect_available:
+            try:
+                detected = self._lang_detect_fn(text)
+                if detected:
+                    lang = detected
+            except Exception:
+                pass
+
+        # Unicode script fallback for non-Latin scripts
+        if lang == "en":
+            has_cjk = False
+            has_kana = False
+            for char in text[:100]:
+                cp = ord(char)
+                if 0x4E00 <= cp <= 0x9FFF:
+                    has_cjk = True
+                elif 0x3040 <= cp <= 0x309F:
+                    has_kana = True
+                elif 0x30A0 <= cp <= 0x30FF:
+                    has_kana = True
+                elif 0xAC00 <= cp <= 0xD7AF:
+                    lang = "ko"; break
+                elif 0x0600 <= cp <= 0x06FF:
+                    lang = "ar"; break
+                elif 0x0400 <= cp <= 0x04FF:
+                    lang = "ru"; break
+                elif 0x0900 <= cp <= 0x097F:
+                    lang = "hi"; break
+                elif 0x0E00 <= cp <= 0x0E7F:
+                    lang = "th"; break
+            if has_cjk or has_kana:
+                lang = "ja" if has_kana else "zh-cn"
+
+        voice = VOICE_MAP.get(lang, "en-US-GuyNeural")
+        if lang != "en":
+            print(f"  🌐 TTS language: {lang} → {voice}")
+        return voice
+
     def _speak_edge(self, text: str):
         """Speak using edge-tts (runs async in thread)."""
         if not self._playback_method:
             print("⚠️ No playback method available")
             return
-        
+
+        # Pick the right voice for the language
+        voice = self._pick_voice_for_text(text)
+
         # Run async edge-tts in its own event loop
         async def _generate():
             import edge_tts
-            
-            voice = self.voice if self.voice != "default" else "en-US-GuyNeural"
+
             rate = f"+{int((self.speed - 1.0) * 50)}%" if self.speed >= 1.0 else f"-{int((1.0 - self.speed) * 50)}%"
-            
+
             tmp_path = tempfile.mktemp(suffix=".mp3")
-            
+
             communicate = edge_tts.Communicate(text, voice, rate=rate)
             await communicate.save(tmp_path)
-            
+
             return tmp_path
-        
+
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             tmp_path = loop.run_until_complete(_generate())
             loop.close()
-            
+
             if not self._stop_requested and Path(tmp_path).exists():
                 self._play_audio(tmp_path)
-            
+
             Path(tmp_path).unlink(missing_ok=True)
-            
+
         except Exception as e:
             print(f"⚠️ edge-tts error: {e}")
     
