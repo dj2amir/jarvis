@@ -17,6 +17,7 @@ Features:
 
 import json
 import os
+import re
 import time
 import threading
 from typing import Optional, Callable, List, Dict
@@ -42,8 +43,12 @@ class Brain:
         # Conversation state
         self.conversation_history: List[Dict] = []
         self.max_history_tokens = self.settings.get("brain.max_history_tokens", 6000)
-        self.system_prompt = self._build_system_prompt()
         
+        # ── Tool-calling setup (must happen BEFORE _build_system_prompt) ──
+        self._tools_catalog = self._build_tools_catalog()
+        self._max_tool_rounds = 3
+        
+        self.system_prompt = self._build_system_prompt()
         self._is_thinking = False
         
         if self._openai_available and self._has_config:
@@ -90,16 +95,154 @@ class Brain:
     def _build_system_prompt(self) -> str:
         try:
             from core.personality import Personality
-            return Personality().build_system_prompt()
+            base = Personality().build_system_prompt()
         except Exception:
-            return "You are JARVIS, a helpful AI assistant. Be concise, witty, and helpful."
+            base = "You are JARVIS, a helpful AI assistant. Be concise, witty, and helpful."
+        
+        # Append tool-calling instructions
+        tools_prompt = self._build_tools_prompt()
+        if tools_prompt:
+            base += tools_prompt
+        
+        return base
     
+    # ────────────────────────────────────────────────────────────
+    # Tool-calling system
+    # ────────────────────────────────────────────────────────────
+
+    def _build_tools_catalog(self) -> List[Dict]:
+        """Build a flat list of tool definitions for the LLM."""
+        try:
+            import actions as jarvis_actions
+            return jarvis_actions.get_all_tools()
+        except Exception:
+            return []
+
+    def _build_tools_prompt(self) -> str:
+        """Generate the tools section of the system prompt."""
+        catalog = self._tools_catalog
+        if not catalog:
+            return ""
+
+        lines = [
+            "\n\n## Available Tools",
+            "You have access to tools that let you take real actions. When you need",
+            "to open an app, search the web, get the time, read/write files, or run",
+            "a shell command, you MUST call the appropriate tool instead of saying",
+            "you can't do it.",
+            "",
+            "To call a tool, output exactly this format:",
+            '<tool_call>{"name": "tool_name", "arguments": {"arg1": "value"}}</tool_call>',
+            "",
+            "You can call multiple tools with multiple <tool_call> blocks.",
+            "You may write natural language before or after the tool calls.",
+            "After calling a tool, the result will be fed back to you so you can",
+            "weave it into a natural response.",
+            "",
+            "Tool list:",
+        ]
+
+        for tool in catalog:
+            params = ", ".join(tool.get("parameters", {}).keys())
+            desc = tool.get("description", "")
+            lines.append(f"- {tool['name']}({params}): {desc}")
+
+        return "\n".join(lines)
+
+    def _parse_tool_calls(self, text: str) -> List[Dict]:
+        """Extract <tool_call> JSON blocks from LLM output.
+
+        Returns list of {name, arguments} dicts.
+        """
+        pattern = r'<tool_call>(.*?)</tool_call>'
+        calls = []
+        for match in re.finditer(pattern, text, re.DOTALL):
+            try:
+                parsed = json.loads(match.group(1).strip())
+                if "name" in parsed:
+                    calls.append({
+                        "name": parsed["name"],
+                        "arguments": parsed.get("arguments", {}),
+                    })
+            except json.JSONDecodeError:
+                continue
+        return calls
+
+    def _execute_tool_calls(self, calls: List[Dict]) -> List[str]:
+        """Execute parsed tool calls and return results."""
+        import actions as jarvis_actions
+
+        results = []
+        for call in calls:
+            name = call["name"]
+            args = call["arguments"]
+            try:
+                result = jarvis_actions.execute(name, **args)
+                results.append(f"[{name}] {result}")
+            except Exception as e:
+                results.append(f"[{name}] Error: {e}")
+        return results
+
+    def _strip_tool_calls(self, text: str) -> str:
+        """Remove <tool_call> blocks from text, leaving natural-language portion."""
+        return re.sub(r'<tool_call>.*?</tool_call>', '', text, flags=re.DOTALL).strip()
+
+    def _tool_loop(self, user_input: str, stream: bool, on_token) -> Optional[str]:
+        """Run the think → tool-call → feedback loop (up to _max_tool_rounds)."""
+        current_input = user_input
+        all_tool_results = []
+        last_natural = ""
+
+        for round_num in range(self._max_tool_rounds):
+            try:
+                response = self._call_llm(self._primary_config, current_input, stream, on_token)
+            except Exception as e:
+                if all_tool_results:
+                    return "\n".join(all_tool_results) + f"\n\n⚠️ Follow-up failed: {e}"
+                return f"⚠️ LLM call failed: {e}"
+
+            if not response:
+                return None
+
+            tool_calls = self._parse_tool_calls(response)
+
+            if not tool_calls:
+                return response
+
+            # Execute discovered tool calls
+            tool_results = self._execute_tool_calls(tool_calls)
+            all_tool_results.extend(tool_results)
+            last_natural = self._strip_tool_calls(response)
+
+            print(f"  🔧 Tool: {', '.join(t['name'] for t in tool_calls)}")
+
+            # Build feedback for next LLM round
+            feedback_lines = [
+                "Tool results:",
+                *[f"  {r}" for r in tool_results],
+                "",
+                "Now respond naturally, weaving these results into your answer.",
+            ]
+            if last_natural:
+                feedback_lines.insert(0, f"(Your previous partial response: {last_natural})")
+
+            current_input = "\n".join(feedback_lines)
+
+        # Max rounds exhausted — return results + last natural-language text
+        if last_natural:
+            return last_natural + "\n\n" + "\n".join(all_tool_results)
+        return "\n".join(all_tool_results)
+
     def is_available(self) -> bool:
         return self._openai_available and self._has_config
     
     def think(self, user_input: str, stream: bool = False,
               on_token: Optional[Callable[[str], None]] = None) -> Optional[str]:
-        """Process user input and return JARVIS's response."""
+        """Process user input and return JARVIS's response.
+
+        Automatically detects tool calls (<tool_call>) in the LLM response,
+        executes them, and feeds results back for a natural summary.
+        """
         if not self._openai_available:
             return "I need the openai package. Run: pip install openai"
         if not self._has_config:
@@ -110,28 +253,16 @@ class Brain:
             self.face.think()
         
         self._extract_memory(user_input)
-        
-        # Try primary, then fallbacks
-        providers_to_try = [self._primary_config]
-        for fb in self._providers.get("fallback_providers", []):
-            providers_to_try.append(fb)
-        
-        last_error = None
-        for config in providers_to_try:
-            try:
-                response = self._call_llm(config, user_input, stream, on_token)
-                if response:
-                    self._update_history(user_input, response)
-                    self._store_memory_from_response(user_input, response)
-                    self._is_thinking = False
-                    return response
-            except Exception as e:
-                last_error = e
-                print(f"⚠️ Provider '{config.get('model')}' failed: {e}")
-                continue
-        
+
+        # Run the tool-calling loop (handles both tool calls and plain chat)
+        response = self._tool_loop(user_input, stream, on_token)
+
+        if response:
+            self._update_history(user_input, response)
+            self._store_memory_from_response(user_input, response)
+
         self._is_thinking = False
-        return f"All providers failed. Error: {last_error}"
+        return response
     
     def _call_llm(self, config: dict, user_input: str,
                   stream: bool = False,
