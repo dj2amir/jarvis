@@ -26,6 +26,7 @@ def main():
     from core.brain import Brain
     from core.memory import Memory
     from core.wake_word import WakeWordEngine
+    import actions as jarvis_actions
 
     settings = Settings()
     face = Face(settings)
@@ -73,12 +74,18 @@ def main():
     else:
         print("  🔊 Wake word: Disabled (enable in config/settings.yaml)")
     
+    # Show available tools
+    tools_count = len(jarvis_actions.get_all_tools())
+    print(f"  🔧 Tools: {tools_count} available ({', '.join(jarvis_actions._MODULES.keys())})")
+
     print()
     print("  Commands:")
     print("    <ask anything>    — JARVIS thinks and responds")
     print("    remember that ... — JARVIS remembers a fact")
     print("    /recall <query>   — Search JARVIS's memories")
     print("    /listen           — Record microphone")
+    print("    /do <name> <args> — Run an action/tool")
+    print("    /tools            — List all available tools")
     print("    /face             — Show face demo")
     print("    /wake             — Toggle wake word on/off")
     print("    /deps             — Check/install dependencies")
@@ -157,6 +164,38 @@ def main():
                 print("\n  JARVIS: Going offline. Goodbye.")
                 break
             
+            elif lower == "/tools":
+                print(f"\n  {jarvis_actions.list_tools()}")
+
+            elif lower.startswith("/do "):
+                # Parse /do <name> [pos_arg1 pos_arg2] [key=value ...]
+                parts = cmd[4:].split()
+                if not parts:
+                    print("  Usage: /do <tool_name> [args...] [key=value ...]")
+                    print("  Example: /do open_app firefox")
+                else:
+                    tool_name = parts[0]
+                    kwargs = {}
+                    pos_args = []
+                    for p in parts[1:]:
+                        if "=" in p:
+                            k, v = p.split("=", 1)
+                            kwargs[k] = v
+                        else:
+                            pos_args.append(p)
+                    # Auto-assign positional args to tool parameters
+                    if pos_args:
+                        for tool in jarvis_actions.get_all_tools():
+                            if tool["name"] == tool_name:
+                                param_names = list(tool.get("parameters", {}).keys())
+                                for i, val in enumerate(pos_args):
+                                    if i < len(param_names):
+                                        kwargs[param_names[i]] = val
+                                break
+                    print(f"  🔧 Running: {tool_name}({kwargs})")
+                    result = jarvis_actions.execute(tool_name, **kwargs)
+                    print(f"  Result: {result}")
+
             elif lower == "/face":
                 face.animate_demo()
             
@@ -209,6 +248,8 @@ def main():
                 print("    remember that ... — JARVIS remembers a fact")
                 print("    /recall <query>   — Search memories")
                 print("    /listen           — Speak with microphone")
+                print("    /do <name> <args> — Run an action/tool")
+                print("    /tools            — List all available tools")
                 print("    /face             — Show face demo")
                 print("    /wake             — Toggle wake word on/off")
                 print("    /deps             — Auto-install missing dependencies")
