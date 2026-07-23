@@ -1,0 +1,63 @@
+{
+  "name": "JARVIS AI Assistant",
+  "version": "1.0.0",
+  "description": "Self-contained dependency manifest. Only external dependency is an LLM API connection.",
+  "only_external_dependency": "LLM API connection (OpenAI-compatible endpoint or LM Studio)",
+  "auto_install": true,
+  "packages": {
+    "core": {
+      "description": "Always required — core AI, config, UI",
+      "required": true,
+      "deps": [
+        "openai>=1.0.0",
+        "python-dotenv>=1.0.0",
+        "pyyaml>=6.0",
+        "requests>=2.31.0",
+        "rich>=13.0.0",
+        "colorama>=0.4.6",
+        "psutil>=5.9.0",
+        "loguru>=0.7.0"
+      ]
+    },
+    "voice": {
+      "description": "Speech-to-text and text-to-speech",
+      "required": false,
+      "auto_detect": true,
+      "deps": [
+        "edge-tts==7.2.8",
+        "sounddevice==0.5.5",
+        "soundfile==0.13.1",
+        "numpy==1.26.4",
+        "scipy==1.15.3"
+      ]
+    },
+    "memory": {
+      "description": "Vector memory with semantic search",
+      "required": false,
+      "auto_detect": true,
+      "deps": [
+        "chromadb>=0.4.0",
+        "sentence-transformers>=2.2.0",
+        "hnswlib>=0.7.0"
+      ]
+    },
+    "vision": {
+      "description": "Camera, face detection, object recognition",
+      "required": false,
+      "auto_detect": false,
+      "deps": [
+        "opencv-python>=4.8.0",
+        "mediapipe>=0.10.0",
+        "Pillow==12.1.1"
+      ]
+    },
+    "face_extra": {
+      "description": "Enhanced face rendering (not needed for terminal mode)",
+      "required": false,
+      "auto_detect": false,
+      "deps": [
+        "pygame==2.6.1"
+      ]
+    }
+  }
+}

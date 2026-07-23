@@ -12,6 +12,10 @@ build/
 # Environment
 .env
 
+# Vendored dependencies (downloaded wheel cache)
+vendor/packages/
+!vendor/packages/.gitkeep
+
 # JARVIS data
 memory_store/*
 !memory_store/.gitkeep

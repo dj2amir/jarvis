@@ -1,21 +1,18 @@
 # ============================================================
 #  JARVIS — Cross-Platform Build Workflow
 #  Builds Windows .exe, Linux binary, and Android APK
-#  Runs on every push and pull request
+#  Only runs when manually triggered (workflow_dispatch)
 # ============================================================
 
 name: Build JARVIS
 
 on:
-  push:
-    branches: [main, master]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - '.env.example'
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
+    inputs:
+      note:
+        description: 'Build note (optional)'
+        required: false
+        default: 'Manual deploy'
 
 jobs:
 
@@ -25,14 +22,14 @@ jobs:
   build-windows:
     name: Windows (.exe)
     runs-on: windows-latest
-    timeout-minutes: 45  # Increased for heavy deps
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -50,6 +47,7 @@ jobs:
             --name "JARVIS" ^
             --add-data "config;config" ^
             --add-data "core;core" ^
+            --add-data "vendor;vendor" ^
             --add-data ".env.example;." ^
             --hidden-import openai ^
             --hidden-import anthropic ^
@@ -89,7 +87,7 @@ jobs:
 
       - name: Upload Windows artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: JARVIS-Windows
           path: dist/JARVIS/
@@ -105,10 +103,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -135,6 +133,7 @@ jobs:
             --name "JARVIS" \
             --add-data "config:config" \
             --add-data "core:core" \
+            --add-data "vendor:vendor" \
             --add-data ".env.example:." \
             --hidden-import openai \
             --hidden-import anthropic \
@@ -183,43 +182,14 @@ jobs:
 
       - name: Upload Linux artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: JARVIS-Linux
           path: dist/JARVIS/
           retention-days: 7
 
   # ──────────────────────────────────────────────
-  #  ANDROID BUILD (via Buildozer)
-  # ──────────────────────────────────────────────
-  build-android:
-    name: Android (APK)
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    continue-on-error: true  # APK builds often fail in CI
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        continue-on-error: true
-        with:
-          workdir: .
-          buildozer_version: master
-
-      - name: Upload Android APK
-        if: steps.buildozer.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: JARVIS-Android
-          path: ${{ steps.buildozer.outputs.filename }}
-          retention-days: 7
-
-  # ──────────────────────────────────────────────
-  #  ANDROID TERMUX ARCHIVE (Fallback)
+  #  ANDROID TERMUX ARCHIVE
   # ──────────────────────────────────────────────
   build-android-termux:
     name: Android (Termux ZIP)
@@ -228,59 +198,54 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Create Termux package
         run: |
           mkdir -p termux-package
           cp -r core termux-package/core/
           cp -r config termux-package/config/
-          cp -r .agent termux-package/.agent/
-          cp -r custom_tools termux-package/custom_tools/
+          cp -r vendor termux-package/vendor/
           cp main.py termux-package/
           cp requirements.txt termux-package/
           cp .env.example termux-package/
-          cp deploy/android/install-termux.sh termux-package/
-          
-          cat > termux-package/requirements-android.txt << 'REQ'
-          openai>=1.0.0
-          numpy>=1.24.0
-          scipy>=1.10.0
-          edge-tts>=6.0.0
-          python-dotenv>=1.0.0
-          requests>=2.31.0
-          pyyaml>=6.0
-          rich>=13.0.0
-          psutil>=5.9.0
-          REQ
+
+          cat > termux-package/install.sh << 'EOF'
+          #!/data/data/com.termux/files/usr/bin/bash
+          echo "Installing JARVIS for Termux..."
+          pkg update -y
+          pkg install -y python portaudio ffmpeg
+          pip install -r requirements.txt
+          echo "JARVIS installed! Run: python main.py"
+          EOF
+          chmod +x termux-package/install.sh
 
       - name: Upload Termux ZIP
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: JARVIS-Android-Termux
           path: termux-package/
           retention-days: 7
 
   # ──────────────────────────────────────────────
-  #  SUMMARY
+  #  BUILD SUMMARY
   # ──────────────────────────────────────────────
   summary:
     name: Build Summary
-    needs: [build-windows, build-linux, build-android, build-android-termux]
+    needs: [build-windows, build-linux, build-android-termux]
     runs-on: ubuntu-latest
     if: always()
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Print build results
         run: |
           echo "╔═══════════════════════════════════════════╗"
           echo "║     JARVIS BUILD SUMMARY                  ║"
           echo "╚═══════════════════════════════════════════╝"
           echo ""
-          echo "  See individual job statuses above."
+          echo "  Windows: JARVIS.exe (standalone)"
+          echo "  Linux:   JARVIS binary (standalone)"
+          echo "  Android: Termux package"
           echo ""
-          echo "  💡 Windows/Linux: Standalone executable"
-          echo "  📱 Android-Termux: For Termux on Android"
-          echo "  📱 Android-APK: May require local Buildozer setup"
+          echo "  To deploy:"
+          echo "    https://github.com/${{ github.repository }}/actions"

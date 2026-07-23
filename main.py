@@ -2,6 +2,7 @@
 """
 JARVIS — Self-Evolving AI Assistant
 Main entry point.
+JARVIS is self-healing: auto-installs missing deps on first run.
 """
 
 import sys
@@ -10,15 +11,21 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.settings import Settings
-from core.face import Face
-from core.stt import STT
-from core.tts import TTS
-from core.brain import Brain
-from core.memory import Memory
-
 
 def main():
+    # ── Self-healing bootstrap (runs first, before any imports) ──
+    from core.bootstrap import get_bootstrap
+    bootstrap = get_bootstrap()
+    if not bootstrap.is_complete():
+        bootstrap.check_and_install()
+
+    from core.settings import Settings
+    from core.face import Face
+    from core.stt import STT
+    from core.tts import TTS
+    from core.brain import Brain
+    from core.memory import Memory
+
     settings = Settings()
     face = Face(settings)
     memory = Memory(settings)
@@ -49,6 +56,15 @@ def main():
     if memory.is_enabled:
         print(f"  💾 Memory: Active ({len(memory.short_term)} messages in session)")
     
+    # Show feature status
+    features = bootstrap.feature_status()
+    avail = [f"{n.upper()}" for n, s in features.items() if s.get("installed")]
+    if avail:
+        print(f"  🔧 Features: {' · '.join(avail)}")
+    missing_tiers = [n for n, s in features.items() if not s.get("installed") and not s.get("required")]
+    if missing_tiers:
+        print(f"  💡 Optional: {' · '.join(missing_tiers)} (auto-installs when needed)")
+    
     print()
     print("  Commands:")
     print("    <ask anything>    — JARVIS thinks and responds")
@@ -56,7 +72,9 @@ def main():
     print("    /recall <query>   — Search JARVIS's memories")
     print("    /listen           — Record microphone")
     print("    /face             — Show face demo")
+    print("    /deps             — Check/install dependencies")
     print("    /memory           — Show memory stats")
+    print("    /status           — Show feature status")
     print("    /exit             — Quit")
     print()
     
@@ -118,8 +136,32 @@ def main():
                 print("    /recall <query>   — Search memories")
                 print("    /listen           — Speak with microphone")
                 print("    /face             — Show face demo")
+                print("    /deps             — Auto-install missing dependencies")
+                print("    /status           — Show feature availability")
                 print("    /memory           — Show memory stats")
                 print("    /exit             — Quit")
+            
+            elif lower == "/deps":
+                print("\n  🔧 Checking dependencies...")
+                features = bootstrap.feature_status()
+                for name, status in features.items():
+                    icon = "✅" if status["installed"] else "⬜"
+                    req = "(required)" if status["required"] else "(optional)"
+                    print(f"  {icon} {name}: {status['ok']}/{status['total']} {req}")
+                print()
+                if bootstrap.check_and_install():
+                    print("  ✅ All dependencies satisfied!")
+                else:
+                    print("  ⚠ Some deps could not be installed. Check logs.")
+            
+            elif lower == "/status":
+                print("\n  📊 JARVIS Feature Status:")
+                features = bootstrap.feature_status()
+                for name, status in features.items():
+                    icon = "✅" if status["installed"] else "⬜"
+                    req = "(required)" if status["required"] else "(optional)"
+                    print(f"  {icon} {name}: {status['description']}")
+                    print(f"     {status['ok']}/{status['total']} packages installed {req}")
             
             elif lower == "/clear":
                 memory.forget_all()
